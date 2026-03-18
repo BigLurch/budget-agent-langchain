@@ -1,4 +1,3 @@
-from langchain.agents import create_agent
 from util.models import get_model
 from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
 from .budget_agent_prompt import BUDGET_AGENT_SYSTEM_PROMPT
@@ -7,10 +6,13 @@ def get_float_input(question):
     while True:
         user_input = input(question).strip().replace(",", ".")
         try:
-            return float(user_input)
+            value = float(user_input)
+            if value < 0:
+                print("Skriv ett värde som är 0 eller högre.")
+                continue
+            return value
         except ValueError:
             print("Ogiltig inmatning. Skriv ett nummer, till exempel 8500 eller 8500,50.")
-
 
 def collect_user_data():
     print("\nJag kommer ställa några frågor för att hjälpa dig göra en enkel budget.\n")
@@ -79,25 +81,58 @@ Bedöm om sparmålet verkar realistiskt.
 Var stöttande och tydlig.
 """
 
-def chat_loop(model, messages):
-    print("\nDu kan nu ställa följdfrågor om din budget.")
-    print("Skriv 'avsluta' om du vill avsluta.\n")
+def show_menu():
+    print("\nVad vill du göra nu?")
+    print("1. Få tips för att spara mer")
+    print("2. Få hjälp att minska kostnader")
+    print("3. Göra om budgeten med nya siffror")
+    print("4. Ställa en egen fråga")
+    print("5. Avsluta")
 
+
+def handle_menu_choice(choice, model, messages):
+    if choice == "1":
+        user_input = (
+            "Ge mig konkreta och pedagogiska tips på hur jag kan spara mer varje månad "
+            "utifrån min nuvarande budget."
+        )
+    elif choice == "2":
+        user_input = (
+            "Analysera min budget och förklara vilka kostnader jag borde börja minska först. "
+            "Ge konkreta förslag."
+        )
+    elif choice == "3":
+        return "restart"
+    elif choice == "4":
+        user_input = input("Skriv din fråga: ").strip()
+    elif choice == "5":
+        return "exit"
+    else:
+        print("Ogiltigt val. Försök igen.")
+        return None
+
+    messages.append(HumanMessage(content=user_input))
+    response = model.invoke(messages)
+
+    print("\nBudget-Agenten:\n")
+    print(response.content)
+
+    messages.append(AIMessage(content=response.content))
+    return "continue"
+
+def menu_loop(model, messages):
     while True:
-        user_input = input("Du: ").strip()
+        show_menu()
+        choice = input("Välj ett alternativ (1-5): ").strip()
 
-        if user_input.lower() in ["avsluta", "exit", "quit", "q"]:
+        result = handle_menu_choice(choice, model, messages)
+
+        if result == "exit":
             print("\nTack för att du använde Budget-Agenten. Lycka till med din budget!")
-            break
-
-        messages.append(HumanMessage(content=user_input))
-        response = model.invoke(messages)
-
-        print("\nBudget-Agenten:\n")
-        print(response.content)
-        print()
-
-        messages.append(AIMessage(content=response.content))
+            return "exit"
+        elif result == "restart":
+            print("\nDå börjar vi om med nya siffror.\n")
+            return "restart"
 
 def main():
     model = get_model()
@@ -105,31 +140,36 @@ def main():
     print("Välkommen till Budget-Agenten!")
     print("Jag hjälper dig att planera din budget steg för steg.\n")
 
-    user_data = collect_user_data()
-    budget_result = calculate_budget(user_data)
-    budget_summary = build_budget_summary(user_data, budget_result)
+    while True:
+        user_data = collect_user_data()
+        budget_result = calculate_budget(user_data)
+        budget_summary = build_budget_summary(user_data, budget_result)
 
-    messages = [
-        SystemMessage(content=BUDGET_AGENT_SYSTEM_PROMPT),
-        HumanMessage(content=budget_summary)
-    ]
+        messages = [
+            SystemMessage(content=BUDGET_AGENT_SYSTEM_PROMPT),
+            HumanMessage(content=budget_summary)
+        ]
 
-    response = model.invoke(messages)
+        response = model.invoke(messages)
 
-    print("\n" + "=" * 40)
-    print("📊 DIN PERSONLIGA BUDGET")
-    print("=" * 40)
-    print(f"Inkomst: {user_data['income']} kr")
-    print(f"Fasta kostnader: {budget_result['fixed_costs']} kr")
-    print(f"Rörliga kostnader: {budget_result['variable_costs']} kr")
-    print(f"Totala utgifter: {budget_result['total_expenses']} kr")
-    print(f"Kvar efter utgifter: {budget_result['remaining']} kr")
-    print(f"Kvar efter sparmål: {budget_result['remaining_after_savings']} kr")
+        print("\n" + "=" * 40)
+        print("📊 DIN PERSONLIGA BUDGET")
+        print("=" * 40)
+        print(f"Inkomst: {user_data['income']:.0f} kr")
+        print(f"Fasta kostnader: {budget_result['fixed_costs']:.0f} kr")
+        print(f"Rörliga kostnader: {budget_result['variable_costs']:.0f} kr")
+        print(f"Totala utgifter: {budget_result['total_expenses']:.0f} kr")
+        print(f"Kvar efter utgifter: {budget_result['remaining']:.0f} kr")
+        print(f"Kvar efter sparmål: {budget_result['remaining_after_savings']:.0f} kr")
 
-    print("\nBudget-Agentens analys:\n")
-    print(response.content)
+        print("\nBudget-Agentens analys:\n")
+        print(response.content)
 
-    chat_loop(model, messages)
+        messages.append(AIMessage(content=response.content))
+
+        result = menu_loop(model, messages)
+        if result != "restart":
+            break
 
 if __name__ == "__main__":
     main()
